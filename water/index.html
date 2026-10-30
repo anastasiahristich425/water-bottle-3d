@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Бутылка с водой</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a2e; }
+        canvas { display: block; }
+        #hint {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px 16px;
+            border-radius: 20px;
+            pointer-events: none;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+<div id="hint">Мышь — вращение · Колесо — зум</div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ================= 1. СЦЕНА И РЕНДЕРЕР =================
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x1a1a2e, 0.02);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(5, 3, 6);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+
+    // ================= 2. СВЕТ =================
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    const mainLight = new THREE.DirectionalLight(0xffffff, 2);
+    mainLight.position.set(5, 10, 5);
+    mainLight.castShadow = true;
+    scene.add(mainLight);
+
+    const backLight = new THREE.PointLight(0x00ffff, 8, 10);
+    backLight.position.set(-4, 2, -3);
+    scene.add(backLight);
+
+    const rimLight = new THREE.PointLight(0xff00ff, 8, 10);
+    rimLight.position.set(4, 0, -3);
+    scene.add(rimLight);
+
+    // ================= 3. УПРАВЛЕНИЕ =================
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, 1.5, 0);
+
+    // ================= 4. МАТЕРИАЛЫ =================
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        metalness: 0.0,
+        roughness: 0.1,
+        transmission: 0.95,
+        thickness: 0.5,
+        ior: 1.5,
+        clearcoat: 1.0,
+        transparent: true,
+        opacity: 0.9
+    });
+
+    const waterMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x0088ff,
+        metalness: 0.1,
+        roughness: 0.1,
+        transmission: 0.9,
+        transparent: true,
+        opacity: 0.9
+    });
+
+    // ================= 5. БУТЫЛКА =================
+    const bottleGroup = new THREE.Group();
+
+    // Точный профиль бутылки (снизу вверх)
+    const points = [
+        new THREE.Vector2(0.00, 0.00), // Дно центр
+        new THREE.Vector2(0.60, 0.00), // Дно край
+        new THREE.Vector2(0.65, 0.10), // Скругление
+        new THREE.Vector2(0.65, 1.80), // Корпус
+        new THREE.Vector2(0.50, 2.30), // Плечо
+        new THREE.Vector2(0.20, 2.70), // Переход в горлышко
+        new THREE.Vector2(0.20, 3.00), // Горлышко
+        new THREE.Vector2(0.24, 3.00), // Губа
+        new THREE.Vector2(0.24, 3.10), // Губа верх
+        new THREE.Vector2(0.18, 3.10), // Внутренняя часть
+        new THREE.Vector2(0.18, 2.80)  // Внутри
+    ];
+
+    const bottleGeo = new THREE.LatheGeometry(points, 64);
+    const bottleMesh = new THREE.Mesh(bottleGeo, glassMaterial);
+    bottleMesh.castShadow = true;
+    bottleMesh.receiveShadow = true;
+    bottleGroup.add(bottleMesh);
+
+    // Вода внутри
+    const waterInsideGeo = new THREE.CylinderGeometry(0.62, 0.62, 1.7, 32);
+    const waterInside = new THREE.Mesh(waterInsideGeo, waterMaterial);
+    waterInside.position.y = 0.85;
+    bottleGroup.add(waterInside);
+
+    // НАКЛОНЯЕМ БУТЫЛКУ (Вправо и вниз)
+    bottleGroup.rotation.z = -Math.PI / 2.2;
+    bottleGroup.rotation.x = Math.PI / 6;
+    bottleGroup.position.set(-0.5, 2.5, 0);
+    scene.add(bottleGroup);
+
+    // ================= 6. ЯКОРЬ ДЛЯ СТРУИ =================
+    // Создаём невидимую точку ровно в центре горлышка
+    const mouthAnchor = new THREE.Object3D();
+    mouthAnchor.position.set(0, 3.1, 0); // Координаты горлышка
+    bottleGroup.add(mouthAnchor);
+
+    // Обновляем матрицу сцены, чтобы узнать точные координаты горлышка в мире
+    scene.updateMatrixWorld(true);
+
+    // Получаем мировые координаты горлышка
+    const mouthWorldPos = new THREE.Vector3();
+    mouthAnchor.getWorldPosition(mouthWorldPos);
+
+    // ================= 7. СТРУЯ ВОДЫ (от горлышка вниз) =================
+    // Строим кривую падения воды
+    const curve = new THREE.CatmullRomCurve3([
+        mouthWorldPos.clone(), // Начало ровно в горлышке
+        mouthWorldPos.clone().add(new THREE.Vector3(0.2, -1.0, 0)), // Падение
+        mouthWorldPos.clone().add(new THREE.Vector3(0.4, -2.5, 0)), // Ускорение
+        mouthWorldPos.clone().add(new THREE.Vector3(0.5, -4.0, 0))  // Конец на полу
+    ]);
+
+    // Делаем струю толще сверху и тоньше снизу
+    const streamGeo = new THREE.TubeGeometry(curve, 64, 0.08, 16, false);
+    const streamMat = new THREE.ShaderMaterial({
+        uniforms: {
+            uTime: { value: 0 },
+            uColor: { value: new THREE.Color(0x00aaff) }
+        },
+        vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+        fragmentShader: `
+                uniform float uTime;
+                uniform vec3 uColor;
+                varying vec2 vUv;
+                void main() {
+                    float flow = sin(vUv.y * 30.0 - uTime * 10.0) * 0.5 + 0.5;
+                    gl_FragColor = vec4(uColor, 0.6 + flow * 0.4);
+                }
+            `,
+        transparent: true,
+        side: THREE.DoubleSide
+    });
+
+    const streamMesh = new THREE.Mesh(streamGeo, streamMat);
+    scene.add(streamMesh);
+
+    // ================= 8. ПОЛ И ЛУЖА =================
+    const floorY = mouthWorldPos.y - 4.0; // Уровень пола
+
+    const floorGeo = new THREE.PlaneGeometry(20, 20);
+    const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.2,
+        metalness: 0.8
+    });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = floorY;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
+    gridHelper.position.y = floorY + 0.01;
+    scene.add(gridHelper);
+
+    // Лужа ровно там, куда падает вода
+    const puddleGeo = new THREE.CircleGeometry(0.8, 32);
+    const puddle = new THREE.Mesh(puddleGeo, waterMaterial);
+    puddle.rotation.x = -Math.PI / 2;
+    puddle.position.set(mouthWorldPos.x + 0.5, floorY + 0.02, mouthWorldPos.z);
+    scene.add(puddle);
+
+    // ================= 9. АНИМАЦИЯ =================
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const time = clock.getElapsedTime();
+
+        // Анимация течения воды
+        streamMat.uniforms.uTime.value = time;
+
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // ================= 10. АДАПТАЦИЯ =================
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
